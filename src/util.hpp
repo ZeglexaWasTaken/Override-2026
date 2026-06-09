@@ -25,10 +25,16 @@ class PID {
     public:
         PID(double p, double i, double d, double iLimit = 1000) : kP(p), kI(i), kD(d), integralLimit(iLimit) {}
 
+        // P is for Proportional: Power is directly propotional to error(distance to target)
+        // I is for Integral: Power is directly proportional to sum of error over time
+        // D is for Derivitave: Power is directly proportional to currentError - prevError(errorDelta)
+        // Added together these values help to mitigate imperfections on the field with pure math.
+
         double compute(double target, double current) 
         {
             error = target - current;
 
+            // I often goes out of control due to its power ever increasing, so a limit is necessary incase you set the value too high.
             if (abs(error) < integralLimit) 
             {
                 integral += error;
