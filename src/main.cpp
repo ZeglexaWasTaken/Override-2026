@@ -57,8 +57,6 @@ void autonomous() {}
  * task, not resume it from where it left off.
  */
 void opcontrol() {
-
-
 	while (true) {
 		// Arcade control scheme
 		int dir = master.get_analog(ANALOG_LEFT_Y);    // Gets amount forward/backward from left joystick
