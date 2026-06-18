@@ -3,8 +3,12 @@
 
 constexpr double wheelDiameter = 2.75;
 constexpr double wheelCircumference = wheelDiameter * M_PI;
+constexpr double gearRatio = 0.75; // Ratio between driving gear and driven gear on the Drivetrain.
 
-constexpr double gearRatio = 0.75;
+constexpr double liftLength = 14.5; // In inches.
+
+constexpr double forwardDistanceOffset = -5; // Displacement between the distance sensor and the center of the robot.
+
 
 // Important class used to smooth out motion. MUST USE for any autonomous command involving Lift or Drivetrain.
 class PID {
@@ -65,6 +69,8 @@ double radToDegrees(double rad);
 double mmToInches(double mm);
 double degToInches(double deg, double circum, double ratio);
 double degToRadians(double deg);
+double getLiftHorizontalDisplacement(double liftLength, double angle);
+double mmToInches(double mm);
 int boolToSign(bool b);
 
 PID turnPID(0, 0, 0);

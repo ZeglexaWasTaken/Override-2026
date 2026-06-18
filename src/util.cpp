@@ -32,3 +32,13 @@ int boolToSign(bool b)
         return -1;
     }
 }
+
+double mmToInches(double mm)
+{
+    return mm / 25.4;
+}
+
+double getLiftHorizontalDisplacement(double liftLength, double angle)
+{
+    return liftLength * cos(degToRadians(angle));
+}

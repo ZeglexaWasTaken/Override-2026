@@ -6,6 +6,7 @@ double odomY = 0;
 
 double driveClamp = 127;
 double turnClamp = 127;
+double liftClamp = 127;
 
 bool clawFaceToggle = true; // True for forwards, False for backwards
 
@@ -18,6 +19,7 @@ pros::MotorGroup left_mg({1, -2, 3}, pros::MotorGears::blue);    // Creates a mo
 pros::MotorGroup right_mg({-4, 5, -6}, pros::MotorGears::blue);  // Creates a motor group with forwards port 5 and reversed ports 4 & 6
 pros::Rotation lift(7);
 pros::Motor claw_pivot_joint(8);
+pros::MotorGroup lift_mg({9, 10}, pros::MotorGears::red);
 
 double coordinateCorrection(pros::Distance sensor, bool yAxis)
 {
@@ -43,10 +45,14 @@ void turnToAngle(double targetAngle, int timeout = 1500)
 {
     turnPID.reset();
     int t = 0;
-    while (abs(targetAngle - getRotation(inertial.get_rotation())) > 1)
+    double currentAngle = getRotation(inertial.get_rotation());
+
+    while (abs(targetAngle - currentAngle) > 1)
     {
         t += 20;
-        double power = turnPID.compute(targetAngle, getRotation(inertial.get_rotation()));
+
+        currentAngle = getRotation(inertial.get_rotation());
+        double power = turnPID.compute(targetAngle, currentAngle);
         power = std::clamp(power, -turnClamp, turnClamp);
 
         left_mg.move(-power);
@@ -85,10 +91,14 @@ void turnToPoint(double targetX, double targetY, bool reverse, int timeout = 150
         }
     }
 
-    while (abs(targetAngle - getRotation(inertial.get_rotation())) > 1)
+    double currentAngle = getRotation(inertial.get_rotation());
+
+    while (abs(targetAngle - currentAngle) > 1)
     {
         t += 20;
-        double power = turnPID.compute(targetAngle, getRotation(inertial.get_rotation()));
+
+        currentAngle = getRotation(inertial.get_rotation());
+        double power = turnPID.compute(targetAngle, currentAngle);
         power = std::clamp(power, -turnClamp, turnClamp);
 
         left_mg.move(-power);
@@ -130,6 +140,7 @@ void updateCoordinatesWithEncoders()
         odomY += odomYDelta;
         odomX += odomXDelta;
 
+        clawPivotMotion();
         pros::delay(10);
     }
 }
@@ -185,29 +196,96 @@ void driveToPoint(double targetX, double targetY, bool reverse, int timeout = 99
     right_mg.move(0);
 }
 
-// IMPORTANT: THIS SHOULD ALWAYS BE RUNNING IN A TASK
+// IMPORTANT: THIS SHOULD ALWAYS BE RUNNING IN A WHILE LOOP IN A TASK
 // This code manages the claw's pitch pivot joint both during autonomous and in driver control.
 void clawPivotMotion()
 {
     double clawPivotGearRatio = 3;
 
-    while (true)
+    double currentLiftAngle = getRotation(lift.get_position()/100);
+    double currentClawAngle = getRotation(claw_pivot_joint.get_position() * clawPivotGearRatio);
+
+    double power = 0;
+    if (currentLiftAngle >= 180)
     {
-        double currentLiftAngle = getRotation(lift.get_position()/100);
-        double currentClawAngle = getRotation(claw_pivot_joint.get_position() * clawPivotGearRatio);
+        double targetPos = -currentLiftAngle * clawPivotGearRatio;
+        power = clawPivotPID.compute(targetPos, currentClawAngle);
+    }
+    else
+    {
+        double targetPos = (-currentLiftAngle * clawPivotGearRatio) + 180;
+        power = clawPivotPID.compute(targetPos, currentClawAngle);
+    }
 
-        if (currentLiftAngle >= 180)
-        {
-            double targetPos = -currentLiftAngle * clawPivotGearRatio;
-            double power = clawPivotPID.compute(targetPos, currentClawAngle);
+    claw_pivot_joint.move(power);
+    pros::delay(20);
+}
 
-            claw_pivot_joint.move(power);
-        }
-        else
+// Lift to an angle in degrees. MUST BE IN A [-180,180] RANGE.
+void liftToAngle(double targetAngle, int timeout = 9999999)
+{
+    int t = 0;
+    liftPID.reset();
+
+    double currentLiftAngle = getRotation(lift.get_position()/100);
+
+    while (abs(targetAngle - currentLiftAngle) > 1)
+    {
+        t += 20;
+        currentLiftAngle = getRotation(lift.get_position()/100);
+        double liftPower = std::clamp(liftPID.compute(targetAngle, currentLiftAngle), -liftClamp, liftClamp);
+
+        lift_mg.move(liftPower);
+
+        if (t >= timeout)
         {
-            double targetPos = (-currentLiftAngle * clawPivotGearRatio) + 180;
-            double power = clawPivotPID.compute(targetPos, currentClawAngle);
+            break;
         }
         pros::delay(20);
     }
+
+    lift_mg.move(0);
+}
+
+// Drive to the object detected so that the lift's claw is positioned over the object.
+// ONLY USE WHEN ALIGNED TO A GOAL OR OBJECT TO BEGIN WITH AND IF THE DISTANCE TO THE OBJECT IS LESS THAN 4FT PREFERABLY.
+void driveLiftOverObject(int timeout = 99999)
+{
+    int t = 0;
+    drivePID.reset();
+    turnPID.reset();
+
+    double currentLiftAngle = getRotation(lift.get_position()/100);
+    double horizontalLiftDisplacement = getLiftHorizontalDisplacement(liftLength, currentLiftAngle);
+
+    double currentDistance = mmToInches(distanceForward.get()) + forwardDistanceOffset;
+    double targetDistance = horizontalLiftDisplacement;
+
+    double targetAngle = getRotation(inertial.get_rotation());
+
+    while (abs(targetDistance - currentDistance) > 1.5)
+    {
+        t += 20;
+        currentLiftAngle = getRotation(lift.get_position()/100);
+        horizontalLiftDisplacement = getLiftHorizontalDisplacement(liftLength, currentLiftAngle);
+        targetDistance = horizontalLiftDisplacement;
+        currentDistance = mmToInches(distanceForward.get()) + forwardDistanceOffset;
+        double currentAngle = getRotation(inertial.get_rotation());
+
+        double power = std::clamp(drivePID.compute(targetDistance, currentDistance), -driveClamp, driveClamp);
+        double turnPower = std::clamp(turnPID.compute(targetAngle, currentAngle), -turnClamp, turnClamp);
+
+        left_mg.move(power - turnPower);
+        right_mg.move(power + turnPower);
+
+        if (t >= timeout)
+        {
+            break;
+        }
+
+        pros::delay(20);
+    }
+
+    left_mg.move(0);
+    right_mg.move(0);
 }

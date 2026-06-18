@@ -8,3 +8,8 @@ void turnToPoint(double targetX, double targetY, bool reverse, int timeout = 150
 void updateCoordinatesWithEncoders();
 
 void driveToPoint(double targetX, double targetY, bool reverse, int timeout = 999999999);
+
+void driveLiftOverObject(double timeout = 99999);
+
+void liftToAngle(double targetAngle);
+
