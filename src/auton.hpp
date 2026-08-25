@@ -13,3 +13,7 @@ void driveLiftOverObject(double timeout = 99999);
 
 void liftToAngle(double targetAngle);
 
+extern double odomX;
+extern double odomY;
+extern double driveClamp;
+extern double turnClamp;

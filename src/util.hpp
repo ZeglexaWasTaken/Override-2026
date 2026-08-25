@@ -9,6 +9,11 @@ constexpr double liftLength = 14.5; // In inches.
 
 constexpr double forwardDistanceOffset = -5; // Displacement between the distance sensor and the center of the robot.
 
+extern pros::Controller master;
+extern pros::MotorGroup left_mg;
+extern pros::MotorGroup right_mg;
+extern pros::IMU inertial;
+
 
 // Important class used to smooth out motion. MUST USE for any autonomous command involving Lift or Drivetrain.
 class PID {
@@ -34,6 +39,7 @@ class PID {
         // D is for Derivitave: Power is directly proportional to currentError - prevError(errorDelta)
         // Added together these values help to mitigate imperfections on the field with pure math.
 
+        // ONLY CALL THIS IN A LOOP OF SOME KIND SO THAT THE ERROR GETS UPDATED ACCORDINGLY.
         double compute(double target, double current) 
         {
             error = target - current;
@@ -73,7 +79,7 @@ double getLiftHorizontalDisplacement(double liftLength, double angle);
 double mmToInches(double mm);
 int boolToSign(bool b);
 
-PID turnPID(0, 0, 0);
-PID drivePID(0, 0, 0);
-PID liftPID(0, 0, 0);
-PID clawPivotPID(0, 0, 0);
+extern PID turnPID;
+extern PID drivePID;
+extern PID liftPID;
+extern PID clawPivotPID;
