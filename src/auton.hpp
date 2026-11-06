@@ -11,9 +11,15 @@ void driveToPoint(double targetX, double targetY, bool reverse, int timeout = 99
 
 void driveLiftOverObject(double timeout = 99999);
 
-void liftToAngle(double targetAngle);
+void driveBlindWithAngle(double power, double targetAngle, double duration);
+
+void liftToAngle(double targetAngle, int timeout = 9999999);
+void holdLift(int timeout = infinity());
 
 extern double odomX;
 extern double odomY;
 extern double driveClamp;
 extern double turnClamp;
+extern double liftClamp;
+
+extern bool lifting;

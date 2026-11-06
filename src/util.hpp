@@ -7,12 +7,19 @@ constexpr double gearRatio = 0.75; // Ratio between driving gear and driven gear
 
 constexpr double liftLength = 14.5; // In inches.
 
+extern double odomX;
+extern double odomY;
+
 constexpr double forwardDistanceOffset = -5; // Displacement between the distance sensor and the center of the robot.
 
 extern pros::Controller master;
 extern pros::MotorGroup left_mg;
 extern pros::MotorGroup right_mg;
+extern pros::MotorGroup lift_mg;
 extern pros::IMU inertial;
+extern pros::Rotation strafingWheel;
+extern pros::Rotation forwardWheel;
+extern pros::Rotation lift;
 
 
 // Important class used to smooth out motion. MUST USE for any autonomous command involving Lift or Drivetrain.

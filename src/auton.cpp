@@ -6,18 +6,13 @@ double turnClamp = 127;
 double liftClamp = 127;
 
 bool clawFaceToggle = true; // True for forwards, False for backwards
-
-double odomX = 8.75;
-double odomY = 72;
+bool lifting = false;
 
 pros::Distance distanceLeft(1);
 pros::Distance distanceRight(2);
 pros::Distance distanceForward(3);
 
-
-pros::Rotation lift(7);
 pros::Motor claw_pivot_joint(8);
-pros::MotorGroup lift_mg({9, 10}, pros::MotorGears::red);
 
 double coordinateCorrection(pros::Distance sensor, bool yAxis)
 {
@@ -48,20 +43,39 @@ void turnToAngle(double targetAngle, int timeout = 999999999)
     int t = 0;
     double currentAngle = getRotation(inertial.get_rotation());
 
-    while (abs(targetAngle - currentAngle) > 0.01)
+    int targetTicksToPass = 5;
+    int ticks = 0;
+
+    while (true)
     {
         t += 20;
 
         currentAngle = getRotation(inertial.get_rotation());
-        double power = turnPID.compute(targetAngle, currentAngle);
+
+        double adjustedTarget = currentAngle + getRotation(targetAngle - currentAngle);
+
+        double power = turnPID.compute(adjustedTarget, currentAngle);
         power = std::clamp(power, -turnClamp, turnClamp);
 
-        left_mg.move(-power);
-        right_mg.move(power);
+        left_mg.move(power);
+        right_mg.move(-power);
 
         if (t >= timeout)
         {
             break;
+        }
+
+        if (abs(getRotation(targetAngle - currentAngle)) <= 5)
+        {
+            ticks += 1;
+
+            if (ticks >= targetTicksToPass)
+            {
+                break;
+            }
+        }
+        else {
+            ticks = 0;
         }
         pros::delay(20);
     }
@@ -118,28 +132,32 @@ void turnToPoint(double targetX, double targetY, bool reverse, int timeout = 999
 
 // IMPORTANT: THIS SHOULD ALWAYS BE RUNNING IN A TASK
 // Updates the odomX and odomY variables via drive encoders for use in auton driving commands. 
-// Note that this style of coordinate finding is unreliable and will cause drift. Use with distance distance sensors for best results.
 void updateCoordinatesWithEncoders()
 {
-    double prevLeft = 0;
-    double prevRight = 0;
+    double prevForward = 0;
+    double prevSide = 0;
+    double prevTheta = 0;
 
     while (true)
     {
-        double leftDelta = left_mg.get_position() - prevLeft;
-        double rightDelta = right_mg.get_position() - prevRight;
+    double theta = degToRadians(getRotation(inertial.get_rotation()));
+    double thetaDelta = theta - prevTheta;
 
-        double forwardDelta = degToInches((leftDelta + rightDelta) / 2, wheelCircumference, gearRatio);
-        double theta = degToRadians(getRotation(inertial.get_rotation()));
+    double rawSideDeg = (strafingWheel.get_position() - prevSide) / 100.0; 
+    double sideDelta = degToInches(rawSideDeg, 2 * M_PI, 1) - (0.5 * thetaDelta);
 
-        prevLeft = left_mg.get_position();
-        prevRight = right_mg.get_position();
+    double rawForward = (forwardWheel.get_position() - prevForward) / 100.0; 
+    double forwardDelta = -degToInches(rawForward, 2 * M_PI, 1) + (0.5 * thetaDelta);
 
-        double odomXDelta = forwardDelta * cos(theta);
-        double odomYDelta = forwardDelta * sin(theta);
+    prevForward = forwardWheel.get_position();
+    prevTheta = theta;
+    prevSide = strafingWheel.get_position();
 
-        odomY += odomYDelta;
-        odomX += odomXDelta;
+    double odomXDelta = (forwardDelta * cos(theta)) + (sideDelta * sin(theta));
+    double odomYDelta = (forwardDelta * sin(theta)) - (sideDelta * cos(theta));
+
+    odomY += odomYDelta;
+    odomX += odomXDelta;
 
         
         pros::delay(10);
@@ -148,51 +166,96 @@ void updateCoordinatesWithEncoders()
 
 // Drive to point X and Y. Angle is determined automatically to get to destination. Angle after command is finished NOT consistent.
 // Do not use this command if there are objects in the way or if turning is too sharp. Use turnToPoint for sharp turning, THEN drive to point.
-void driveToPoint(double targetX, double targetY, bool reverse, int timeout = 999999999)
+void driveToPoint(double targetX, double targetY, bool reverse, int timeout = infinity())
 {
     drivePID.reset();
     turnPID.reset();
     int t = 0;
-    // double initialDistance = abs(sqrt(pow(targetX - odomX, 2) + pow(targetY - odomY, 2)));
+    int targetTicksToPass = 8;
+    int ticks = 0;
+    
+    double startX = odomX;
+    double startY = odomY;
 
-    while (abs(sqrt(pow(targetX - odomX, 2) + pow(targetY - odomY, 2))) > 0.001)
+    double pathX = targetX - startX;
+    double pathY = targetY - startY;
+
+    double initialDistance = std::hypot(pathX, pathY);
+
+    double unitX = pathX / initialDistance;
+    double unitY = pathY / initialDistance;
+
+    double initialTurnClamp = turnClamp;
+
+    double targetAngle = radToDegrees(atan2(pathY, pathX));
+    targetAngle = getRotation(targetAngle);
+
+    while (true)
     {
         t += 20;
 
-        double currentDistance = abs(sqrt(pow(targetX - odomX, 2) + pow(targetY - odomY, 2)));
-        double drivePower = drivePID.compute(0, -currentDistance);
+        double progress = (odomX - startX) * unitX + (odomY - startY) * unitY;
+
+        double remainingDistance = initialDistance - progress;
+
+        double drivePower = drivePID.compute(0, -remainingDistance);
         drivePower = std::clamp(drivePower, -driveClamp, driveClamp);
 
-        double targetAngle = radToDegrees(atan2(targetY - odomY, targetX - odomX));
-        targetAngle = getRotation(targetAngle);
-
-        if (reverse)
-        { 
-            // Since we are driving backwards, the robot needs to rotate 180 from the forward target angle in order to be facing in reverse.
-            if (targetAngle >= 0)
-            {
-                targetAngle = getRotation(targetAngle + 180);
-            }
-            else
-            {
-                targetAngle = getRotation(targetAngle - 180);
-            }
-        }
+        // double targetAngle = radToDegrees(atan2(targetY - odomY, targetX - odomX));
+        // targetAngle = getRotation(targetAngle);
 
         double turnPower = turnPID.compute(targetAngle, getRotation(inertial.get_rotation()));
         turnPower = std::clamp(turnPower, -turnClamp, turnClamp);
 
         // Switch operator signs if reverse is true.
-        left_mg.move((drivePower * -boolToSign(reverse)) - (turnPower));
-        right_mg.move((drivePower * -boolToSign(reverse)) + (turnPower));
+        left_mg.move((drivePower) + (turnPower));
+        right_mg.move((drivePower) - (turnPower));
 
         if (t >= timeout)
         {
             break;
         }
+
+
+        if (std::abs(remainingDistance) <= 1.25)
+        {
+            turnClamp = 10;
+            ticks += 1;
+
+            if (ticks >= targetTicksToPass) {break;}
+        }
+        else {
+            ticks = 0;
+        }
         pros::delay(20);
     }
     
+    left_mg.move(0);
+    right_mg.move(0);
+    turnClamp = initialTurnClamp;
+}
+
+// Drive forward/backwards without following an X and Y coordinate while still maintaining a certain angle.
+// ANGLE MUST BE [-180, 180] RANGE
+void driveBlindWithAngle(double power, double targetAngle, double duration)
+{
+    int t = 0;
+
+    while (true)
+    {
+        t += 20;
+        double turnPower = turnPID.compute(targetAngle, getRotation(inertial.get_rotation()));
+        turnPower = std::clamp(turnPower, -turnClamp, turnClamp);
+
+        // Switch operator signs if reverse is true.
+        left_mg.move((power) + (turnPower));
+        right_mg.move((power) - (turnPower));
+
+        if (t >= duration) {break;}
+
+        pros::delay(20);
+    }
+
     left_mg.move(0);
     right_mg.move(0);
 }
@@ -227,10 +290,13 @@ void liftToAngle(double targetAngle, int timeout = 9999999)
 {
     int t = 0;
     liftPID.reset();
+    int targetTicksToPass = 2;
+    int ticks = 0;
 
     double currentLiftAngle = getRotation(lift.get_position()/100);
+    lifting = true;
 
-    while (abs(targetAngle - currentLiftAngle) > 1)
+    while (true)
     {
         t += 20;
         currentLiftAngle = getRotation(lift.get_position()/100);
@@ -242,10 +308,48 @@ void liftToAngle(double targetAngle, int timeout = 9999999)
         {
             break;
         }
+
+        if (abs(targetAngle - currentLiftAngle) <= 3)
+        {
+            ticks += 1;
+
+            if (ticks >= targetTicksToPass) {break;}
+        }
         pros::delay(20);
     }
 
     lift_mg.move(0);
+    lifting = false;
+}
+
+// Hold the lift to an angle while the lift isn't being moved. Will stop after a lift is commanded.
+void holdLift(int timeout = infinity())
+{
+    liftPID.reset();
+
+    double currentLiftAngle = getRotation(lift.get_position()/100);
+    double targetAngle = currentLiftAngle;
+
+    lifting = false;
+    int t = 0;
+
+    while (true)
+    {
+        t += 20;
+        currentLiftAngle = getRotation(lift.get_position()/100);
+        double liftPower = std::clamp(liftPID.compute(targetAngle, currentLiftAngle), -liftClamp, liftClamp);
+
+        lift_mg.move(liftPower);
+
+        if (lifting) {
+            break;
+        }
+
+        if (t >= timeout) {
+            break;
+        }
+        pros::delay(20);
+    }
 }
 
 // // Drive to the object detected so that the lift's claw is positioned over the object.
